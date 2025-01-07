@@ -1,0 +1,282 @@
+# Load the parallel package
+library(parallel)
+
+# Code developed by Zachary Dickens 8/8/2024
+
+# Probably better to have a input for the TAXA names but I all ready made this previously and thus reused this.
+# TAXA_names <- read.table(TAXA_names_pathway, sep= "\t")
+
+#TAXA names imputed for generation of proper output.
+TAXA_names <- c("117268", "117271", "117276", "117277", "117280", "117443", "117447", "117454",
+                "117460", "117463", "117470", "117478", "117500", "117501", "117520", "117521",
+                "117525", "117527", "117531", "117533", "117559", "117561", "117563", "117564",
+                "117567", "117574", "117587", "117589", "117598", "117622", "117623", "117636",
+                "117659", "117681", "117682", "117684", "117691", "117745", "117757", "117758",
+                "117784", "117793", "117826", "117829", "117840", "117841", "117848", "117849",
+                "117880", "117881", "117907", "117912", "117915", "120855", "120856", "120859",
+                "120860", "120861", "120862", "120863", "120867", "120878", "120879", "120880",
+                "120882", "120883", "120892", "120893", "120895", "120904", "120909", "120912",
+                "120913", "120914", "120916", "120924", "120925", "120929", "120939", "120946",
+                "120947", "120948", "120949", "120952", "120958", "120959", "120964", "120970",
+                "120972", "120977", "120979", "120981", "120982", "120983", "120984", "120986",
+                "120987", "120988", "120994", "120998", "121001", "121010", "121011", "121015",
+                "121019", "121020", "121023", "121024", "121028", "121034", "121035", "121040",
+                "121041", "121042", "121043", "121044", "121045", "121049", "121050", "121051",
+                "121052", "121053", "121059", "121062", "121063", "121064", "121065", "121066",
+                "121070", "121073", "121074", "121077", "121079", "121080", "121083", "121085",
+                "121087", "121089", "121091", "121092", "121093", "121094", "121095", "121098",
+                "121099", "121100", "121101", "121102", "121104", "121105", "121110", "121111",
+                "121118", "121122", "121124", "121127", "121130", "121131", "121136", "121137",
+                "121139", "121140", "121141", "121142", "121144", "121146", "121147", "121151",
+                "121152", "121153", "121156", "121157", "121158", "121159", "121161", "121162",
+                "121163", "121164", "121165", "121169", "121172", "121176", "121225", "121235",
+                "121237", "121576", "121642", "121663", "121689", "121705", "121708", "121716",
+                "121717", "121721", "121725", "121748", "121750", "121751", "121752", "121753",
+                "121760", "121771", "121774", "121785", "121799", "121808", "121811", "121812",
+                "121821", "121823", "121827", "121829", "121830", "121834", "121835", "121836", 
+                "121839", "121840", "121846", "121847", "121848", "121849", "121850", "121851",
+                "121852", "121853", "121854", "121855", "121856", "121857", "121858", "121881",
+                "121889", "121963", "121965", "121990", "122000", "122011", "122025", "122029",
+                "122076", "122088", "122089", "122090", "122091", "122093", "122094", "122098",
+                "122099", "122112", "122140", "122156", "122159", "122179", "122181", "122206",
+                "122232", "122236", "122239", "122255", "122258", "122272", "122284", "122285",
+                "122286", "122287", "122288", "122289", "122290", "122291", "122298")
+# i is the chromosome number for the entire code. 
+#(I have all-ways used just one at a time because I was afraid of it breaking at some point in the night)
+for(i in c(4, 6)){
+
+  process_chunk <- function(q, i, TAXA_names) {
+    file_path <- paste("C:/Users/lczacktd/Desktop/Chr", i, "/Chr", i, "_region", q, ".txt", sep = "")
+    col_classes <- c("character", "character", "character", "character", "character")
+    test1 <- read.table(file_path, colClasses = col_classes)
+    colnames(test1)[1:5] <- c("chrom", "rs", "pos", "allele1", "allele2")
+    
+    # The remaining columns need to be renamed
+    num_fixed_cols <- 5  # First 5 columns are fixed
+    
+    # Generate new taxa column names
+    taxa_colnames <- unlist(lapply(TAXA_names, function(taxa) {
+      c(taxa, paste0(taxa, ".1"), paste0(taxa, ".2"))
+    }))
+    
+    # Apply the new column names
+    colnames(test1)[(num_fixed_cols + 1):ncol(test1)] <- taxa_colnames
+    
+    Gene1 <- data.frame(matrix(ncol = 282, nrow = nrow(test1)))
+    colnames(Gene1)[1:11] <- c("rs", "alleles", "chrom", "pos", "strand", "assembly", "center",
+                               "protLSID", "assayLSID", "panelLSID", "QCcode")
+    colnames(Gene1)[12:282] <- TAXA_names
+    
+    Gene1$rs <- test1$rs
+    Gene1$chrom <- i
+    Gene1$pos <- test1$pos
+    Gene1$strand <- "+"
+    Gene1$assembly <- NA
+    Gene1$center <- NA
+    Gene1$protLSID <- NA
+    Gene1$assayLSID <- NA
+    Gene1$panelLSID <- NA
+    Gene1$QCcode <- NA
+    
+    allele <- data.frame(matrix(ncol = 1, nrow = nrow(test1)))
+    colnames(allele) <- c("allele")
+    
+
+    for(w in 1:nrow(test1)) {
+      allele$allele[w] <- paste(test1$allele1[w], "/", test1$allele2[w], sep = "")
+    }
+    
+    allele$homo1 <- test1$allele1
+    allele$homo2 <- test1$allele2
+    
+    for (w in 1:nrow(allele)) {
+      if (allele$allele[w] %in% c("A/T", "T/A")) {
+        allele$het[w] <- "W"
+      } else if (allele$allele[w] %in% c("G/T", "T/G")) {
+        allele$het[w] <- "K"
+      } else if (allele$allele[w] %in% c("C/T", "T/C")) {
+        allele$het[w] <- "Y"
+      } else if (allele$allele[w] %in% c("A/G", "G/A")) {
+        allele$het[w] <- "R"
+      } else if (allele$allele[w] %in% c("A/C", "C/A")) {
+        allele$het[w] <- "M"
+      } else if (allele$allele[w] %in% c("G/C", "C/G")) {
+        allele$het[w] <- "S"
+      } else {
+        allele$het[w] <- NA
+      }
+    }
+    
+
+    Gene1$alleles <- allele$allele
+    
+    NE1 <- 0
+    NE2 <- 0
+    NE3 <- 0
+    NE4 <- 0
+    NE5 <- 0
+    NA_number <- 0
+    
+    for (w in unique(TAXA_names)) {
+      for (y in 1:nrow(test1)) {
+        taxa1 <- w
+        taxa2 <- paste(taxa1, ".1", sep = "")
+        taxa3 <- paste(taxa1, ".2", sep = "")
+        
+        name1 <- as.numeric(test1[y, taxa1])
+        name2 <- as.numeric(test1[y, taxa2])
+        name3 <- as.numeric(test1[y, taxa3])
+        
+        if (is.na(name1) || is.na(name2) || is.na(name3)) {
+          Gene1[y, w] <- NA
+          NA_number <- NA_number + 1
+          next
+        }
+        if(name1 > name2 & name1 > name3){
+          Gene1[y, w] <- allele$homo1[y]
+          next
+        }
+        if(name2 > name1 & name2 > name3){
+          Gene1[y, w] <- allele$het[y]
+          next
+        }
+        if(name3 > name1 & name3 > name2){
+          Gene1[y, w] <- allele$homo2[y]
+          next
+        }
+        if(name1 == name2 & name1 > name3){
+          Gene1[y, w] <- allele$homo1[y]
+          NE1 <- NE1 + 1
+          next
+        }
+        if(name3 == name2 & name3 > name1){
+          Gene1[y, w] <- allele$homo2[y]
+          NE2 <- NE2 + 1
+          next
+        }
+        if(name3 == name1 & name3 > name2){
+          Gene1[y, w] <- allele$het[y]
+          NE3 <- NE3 + 1
+          next
+        }
+        if(name3 == name2 & name3 == name1){
+          Gene1[y, w] <- allele$het[y]
+          NE4 <- NE4 + 1
+          next
+        }
+        else{
+          NE5 <- NE5 + 1
+        }
+      }
+    }
+    
+
+    outputfolder <- paste("C:/Users/lczacktd/Desktop/Chr", i, "/HPM/", sep = "")
+    setwd(outputfolder)
+    outputfilename <- paste("hmp", i, ".", q, ".txt", sep = "")
+    write.table(Gene1, file = outputfilename, sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+    
+    logfile_col_names <- c("NE1", "NE2", "NE3", "NE4", "NE5", "error_rate", "NAtest", "SNP_number", "NA_number")
+    logfile_row_names <- c(paste("chunk", q))
+    Output_chunk_Log_dataframe <- data.frame(matrix(NA, nrow=1, ncol=9))
+    # Assign column names
+    colnames(Output_chunk_Log_dataframe) <- logfile_col_names
+    # Assign row names
+    rownames(Output_chunk_Log_dataframe) <- logfile_row_names
+    
+
+    
+    Output_chunk_Log_dataframe[1,1] <- NE1
+    Output_chunk_Log_dataframe[1,2] <- NE2
+    Output_chunk_Log_dataframe[1,3] <- NE3
+    Output_chunk_Log_dataframe[1,4] <- NE4
+    Output_chunk_Log_dataframe[1,5] <- NE5
+    Output_chunk_Log_dataframe[1,6] <- ((NE1 + NE2 +NE3 +NE4 +NE5)/nrow(Gene1))
+    Output_chunk_Log_dataframe[1,7] <- anyNA(Gene1[12:282])
+    Output_chunk_Log_dataframe[1,8] <- nrow(Gene1[12:282])
+    Output_chunk_Log_dataframe[1,9] <- NA_number
+    output_logfilename <- paste("hmp_log", i, ".", q, ".txt", sep = "")
+    write.table(Output_chunk_Log_dataframe, file = output_logfilename, sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+
+    return()
+  }
+  
+  # Set up a cluster with the number of cores available
+  cl <- makeCluster(detectCores())
+  
+  # Export necessary variables and functions to the cluster
+  clusterExport(cl, list("process_chunk", "TAXA_names", "i"))
+  
+  # Run the function in parallel for each chunk (1 to 15)
+  results <- parLapply(cl, 1:15, process_chunk, i = i, TAXA_names = TAXA_names)
+  
+  # Stop the cluster after use
+  stopCluster(cl)
+
+
+  # Generate a list of inputted data frame names for generating total chromosome output.
+  listlogs <- list()
+  
+  # Reading all the data frames for the chromosome chunks back into R environment.
+  for(q in 1:15){
+    outputfolder <- paste("C:/Users/lczacktd/Desktop/Chr", i, "/HPM/", sep = "")
+    outputfilename <- paste("hmp_log", i, ".", q, ".txt", sep = "")
+    datafilename <- paste(outputfolder, outputfilename, sep = "")
+    readdataframe <- read.table(datafilename, header = TRUE, sep = "\t")
+    listlogs[[q]] <- readdataframe
+  }
+  # Stitching all chromosome parts back together into one total file.
+  Total_log_output_file <- do.call(rbind, listlogs[])
+
+  # generating the total data for the Log data frame:
+  total_log_data <- data.frame(matrix(ncol = ncol(Total_log_output_file), nrow = 1))
+  logfile_col_names <- c("NE1", "NE2", "NE3", "NE4", "NE5", "error_rate", "NAtest", "SNP_number", "NA_number")
+  colnames(total_log_data) <- logfile_col_names
+  rownames(total_log_data) <- "total"
+  if(any(Total_log_output_file$NAtest == "TRUE")){
+    total_log_data$NAtest <- "TRUE"
+  } else {
+    total_log_data$NAtest <- "FALSE"
+  }
+  
+  total_log_data$NE1           <- sum(Total_log_output_file$NE1)
+  total_log_data$NE2           <- sum(Total_log_output_file$NE2)
+  total_log_data$NE3           <- sum(Total_log_output_file$NE3)
+  total_log_data$NE4           <- sum(Total_log_output_file$NE4)
+  total_log_data$NE5           <- sum(Total_log_output_file$NE5)
+  total_log_data$SNP_number    <- sum(Total_log_output_file$SNP_number)
+  total_log_data$error_rate    <- ((sum(total_log_data[,1:5]))/total_log_data[,8])
+  total_log_data$NA_number     <- sum(Total_log_output_file$NA_number)
+  Total_log_output_file <- rbind(Total_log_output_file, total_log_data)
+  
+
+  # Generate a list of inputted data frame names for generating total chromosome output.
+  listchuncks <- list()
+  
+  # Reading all the data frames for the chromosome chunks back into R environment and stitching them together
+  for(q in 1:15){
+    outputfolder <- paste("C:/Users/lczacktd/Desktop/Chr", i, "/HPM/", sep = "")
+    outputfilename <- paste("hmp", i, ".", q, ".txt", sep = "")
+    datafilename <- paste(outputfolder, outputfilename, sep = "")
+    readdataframe <- read.table(datafilename)
+    listchuncks[[q]] <- readdataframe
+  }
+  Totaloutputfile <- do.call(rbind, listchuncks)
+  
+  # exporting Log File
+  outputfolderlog <- paste("C:/Users/lczacktd/Desktop/Chr",i,"/HPM/",sep = "")
+  setwd(outputfolderlog)
+  outputfilenamelog <- paste("hmp",i,"_total_log_output.txt", sep ="")
+  write.table(Total_log_output_file, file = outputfilenamelog, sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+  
+  # export the total Chromosome SNP file.
+  outputfolder <- paste("C:/Users/lczacktd/Desktop/Chr",i,"/HPM/",sep = "")
+  setwd(outputfolder)
+  outputfilename <- paste("Chromosome",i,"_total_hmp.txt", sep ="")
+  write.table(Totaloutputfile, file = outputfilename, sep = "\t", quote = FALSE, row.names = TRUE, col.names = TRUE)
+}######################### the end for 1 chromosome ############################
+
+
+
+
+
