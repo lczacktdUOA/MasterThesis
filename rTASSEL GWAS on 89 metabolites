@@ -1,0 +1,255 @@
+
+################################credits#########################################
+
+
+#rTassel PCA/GWAS of rice metabolic products under Drought stress.
+#Zachary Dickens
+# based on Chosens' code
+
+
+#############If rJava/rTASSEL not accepting Allocated memory####################
+
+
+remove.packages("rJava")
+remove.packages("rTASSEL")
+
+install.packages("rJava")
+devtools::install_github(
+  repo = "maize-genetics/rTASSEL",
+  ref = "master",
+  build_vignettes = TRUE,
+  dependencies = TRUE
+)
+
+
+########################Allocate maximum memory to rTASSEL######################
+
+
+#need to give java memory before rJava or rTASSEL are oppen!!!!!!!!!!!!!!!!!!!!!
+options(java.parameters = c("-Xmx200g", "-Xms30g"))
+
+
+library(rJava)
+library(rTASSEL)
+
+library(dplyr)
+library(ggplot2)
+library(magrittr)
+library(tibble)
+library(ggtree)
+
+
+###########################General Input/Output data############################
+
+
+##########Defining project##########
+
+# Should be the only variables changed per project!
+Project.name <- "Rice_Project_2024"
+Spieces.name <- "Rice"
+Output_name <- "Testing2"
+Pvalue.GWAS <- .05
+number_of_snp <- 81347
+Mannual_Pvalue <- 5
+
+# Setting up Input pathways and output pathways
+EIO <-"C:/Users/lczacktd/Desktop/Chr11/HPM/"
+rTASSEL_output <-paste(EIO,"/rTASSEL_output/",sep = "")
+control_output <-paste(rTASSEL_output,"Control/", sep="")
+experimental_output <-paste(rTASSEL_output,"Experimental/", sep="")
+pca_output <- paste(rTASSEL_output,"PCA/",sep ="")
+CSV_CON_output <- paste(control_output,"CSV/",sep ="")
+CSV_EXP_output <-paste(experimental_output,"CSV/", sep="")
+PNG_CON_output <-paste(control_output,"png/",sep ="")
+PNG_EXP_output <-paste(experimental_output,"png/",sep ="")
+PNG_Mannual_Value_C <-paste(PNG_CON_output,"Mannual_Value/",sep ="")
+PNG_Mannual_Value_E <-paste(PNG_EXP_output,"Mannual_Value/",sep ="")
+PNG_Calculated_C <-paste(PNG_CON_output,"Calculated_Value/",sep ="")
+PNG_Calculated_E <-paste(PNG_EXP_output,"Calculated_Value/",sep ="")
+
+# If Output Directory don't exits create the Directory
+dir.create(rTASSEL_output)
+dir.create(control_output)
+dir.create(experimental_output)
+dir.create(CSV_CON_output)
+dir.create(CSV_EXP_output)
+dir.create(PNG_CON_output)
+dir.create(PNG_EXP_output)
+dir.create(PNG_Mannual_Value_C)
+dir.create(PNG_Mannual_Value_E)
+dir.create(PNG_Calculated_C)
+dir.create(PNG_Calculated_E)
+
+# Setting working directory for logging file
+setwd(rTASSEL_output)
+
+# Create logging file. #This should be run once at the beginning of the analysis
+rTASSEL::startLogger(fullPath = NULL, fileName = Output_name)
+
+###########The Pathway of Phenotype and Genomic(SNP)###########
+
+# The Pathway of Phenotype and Genomic(SNP) data
+PP <-"C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Phenotypic_Data/"       
+GP1 <-"C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Genomic(SNP)_Data/"
+EP <-(paste(EIO,"/Data/Project_Design/",sep = ""))
+
+# Name of Phenotype/Genomic/Design Data file
+PNC <-(paste(Spieces.name,"_Pheno_TASSEL_CON.2.txt",sep = ""))                                                            
+PNE <-(paste(Spieces.name,"_Pheno_TASSEL_EXP.2.txt",sep = ""))                                                       
+GN1 <-(paste(Spieces.name,"_SNP_Clean.hmp.txt",sep = ""))
+GN2 <- "Chr11.test1.hmp.txt"
+ED <-(paste(Spieces.name,"_Experimental_Design.csv",sep = ""))
+PNL <-(paste(Spieces.name,"_Phenotype_list.txt", sep = ""))
+
+# Imputing Data
+PHE_file_C <- paste(PP,PNC, sep="")                          
+PHE_file_E <- paste(PP,PNE, sep="")                          
+snp_file1 <- paste(GP1,GN1, sep="") 
+snp_file2 <- paste(EIO,GN2, sep="")
+PHE_file_L <- paste(PP, PNL, sep="")
+
+#################Load genotype and phenotype data into rTASSEL##################
+
+test2 <- read.table(snp_file2)
+test1 <- read.table(snp_file1)
+test2[1,] <- test1[1,]
+write.table(test2, "Chr11.hmp.txt", row.names = FALSE, col.names = FALSE)
+test2 <- read.table(snp_file2, header = TRUE)
+test1 <- read.table(snp_file1, header = TRUE)
+test2$chrom <- 11
+write.table(test2, "Chr11.hmp.txt", row.names = FALSE, col.names = TRUE, sep = "\t")
+
+
+geno1 <- rTASSEL::readGenotypeTableFromPath(path = snp_file1)
+geno2 <- rTASSEL::readGenotypeTableFromPath(path = snp_file2)
+pheno_C <- rTASSEL::readPhenotypeFromPath(path = PHE_file_C)
+pheno_E <- rTASSEL::readPhenotypeFromPath(path = PHE_file_E)
+
+############################Joining Data in rTASSEL#############################
+
+
+geno2_pheno_C <- readGenotypePhenotype(
+  phenoPathDFOrObj = pheno_C,
+  genoPathOrObj = geno2
+)
+
+geno2_pheno_E <- readGenotypePhenotype(
+  phenoPathDFOrObj = pheno_E,
+  genoPathOrObj = geno2
+)
+geno1_pheno_E <- readGenotypePhenotype(
+  phenoPathDFOrObj = pheno_E,
+  genoPathOrObj = geno1
+)
+
+##################################GWAS##########################################
+
+
+###########Filter genotype table sites###########
+#Control and Experimental matter again
+#Control
+geno2_pheno_filtered_C <- rTASSEL::filterGenotypeTableSites(
+  tasObj = geno2_pheno_C,
+  siteMinCount = 150,
+  siteMinAlleleFreq = 0.05,
+  siteMaxAlleleFreq = 1.0,
+  siteRangeFilterType = "none"
+)
+#Experimental
+geno2_pheno_filtered_E <- rTASSEL::filterGenotypeTableSites(
+  tasObj = geno2_pheno_E,
+  siteMinCount = 150,
+  siteMinAlleleFreq = 0.05,
+  siteMaxAlleleFreq = 1.0,
+  siteRangeFilterType = "none"
+)
+#Experimental
+geno1_pheno_filtered_E <- rTASSEL::filterGenotypeTableSites(
+  tasObj = geno1_pheno_E,
+  siteMinCount = 150,
+  siteMinAlleleFreq = 0.05,
+  siteMaxAlleleFreq = 1.0,
+  siteRangeFilterType = "none"
+)
+###########Create a kinship matrix object###########
+#Control and Experimental should be the same
+#Kinship
+kin <- rTASSEL::kinshipMatrix(
+  tasObj = geno1_pheno_filtered_E,
+  method = "Centered_IBS",
+  maxAlleles = 6)
+
+
+###########Associations###########
+
+#single GWAS
+
+#################################Control########################################
+
+#Valine
+assocRes_MLM_ARG2 <- assocModelFitter(
+  geno2_pheno_filtered_E,
+  formula = A7 ~ Treatment,
+  fitMarkers = TRUE,
+  kinship = kin,
+  maxP = 1)
+
+#Valine
+assocRes_MLM_Valine1 <- assocModelFitter(
+  geno1_pheno_filtered_E,
+  formula = A91 ~ Treatment,
+  fitMarkers = TRUE,
+  kinship = kin,
+  maxP = 1)
+
+
+#GWAS for all traits
+
+AllGWAS_E<- assocModelFitter(
+  geno2_pheno_filtered_E,
+  formula = . ~ .,
+  fitMarkers = TRUE,
+  kinship = kin,
+  maxP = 1)
+
+###########plotting GWAS results###########
+# Assuming extracted.phenotype.list contains the list of phenotypes
+#calculating Pvalue threshold <- -log(Pvalue.GWAS/number of snp)
+
+Pvalue <- -log(.05/nrow(test2), base = 10)
+print(Pvalue)
+
+
+A <- plotManhattan(
+  assocRes_MLM_ARG2,
+  trait = "A7",
+  threshold = Pvalue,
+  interactive = FALSE,
+  colors = c("#00AFBB", "#FC4E07"))
+print(A)
+
+
+B <- plotManhattan(
+  assocRes_MLM_Valine1,
+  trait = "A91",
+  threshold = Pvalue,
+  interactive = FALSE,
+  colors = c("#00AFBB", "#FC4E07"))
+print(B)
+
+
+
+
+#################################CSV############################################
+
+  CSV_EXP_output <- paste(rTASSEL_output,"Experimental/CSV/Valine_MLM_imputed.csv",sep ="")
+  results_CSV_data <- assocRes_MLM_Valine@results$MLM_Stats[assocRes_MLM_Valine@results$MLM_Stats$Trait == "A91", ]
+  write.csv(results_CSV_data, CSV_EXP_output, row.names = FALSE)
+
+
+  CSV_EXP_output <- paste(rTASSEL_output,"Experimental/CSV/ALL_MLM_imputed.csv",sep ="")
+  results_CSV_data <- AllGWAS_E@results$MLM_Stats
+  write.csv(results_CSV_data, CSV_EXP_output, row.names = FALSE)
+  
+  
+  
