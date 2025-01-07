@@ -1,0 +1,143 @@
+
+library(ggplot2)
+library(stats)
+library(dplyr)
+
+# Assume `gwa_results` is your statistical output
+project_name <- "Rice_Project_2024"
+species_name <- "Rice"
+
+EIO <- paste("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/", project_name, sep = "")
+PP <- paste(EIO, "/Data/Phenotypic_Data/", sep = "")
+rTASSEL_path <- paste(EIO, "/code_output/rTASSEL_output/", sep = "")
+setwd(rTASSEL_path)
+GWASpath <- "C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/code_output/rtassel_output/GWAS(47)/"
+GWASname1 <- "CON_AllGWAS_40MLM_stats.csv"
+GWASname2 <- "EXP_AllGWAS_40MLM_stats.csv"
+traitname <- "Trait.key.txt"
+# Data names
+all_IBS_C_PC0_path <- paste0(GWASpath, GWASname1)
+all_IBS_E_PC0_path <- paste0(GWASpath, GWASname2)
+trait_path <- paste0(PP, traitname)
+
+all_IBS_C_PC0 <- read.csv(all_IBS_C_PC0_path)
+all_IBS_E_PC0 <- read.csv(all_IBS_E_PC0_path)
+traitkey <- read.table(trait_path, sep = "\t", header = T)
+
+clean_IBS_C_PC0 <- subset(all_IBS_C_PC0, !is.na(Chr))
+clean_IBS_E_PC0 <- subset(all_IBS_E_PC0, !is.na(Chr))
+
+
+for (i in 1:91) {
+  for (Q in c("E", "C")) {
+    A <- paste("A", i, ".clean.", Q, sep = "")
+    B <- paste("QQplot.A", i,".", Q, ".png", sep = "")
+    if (Q == "E") {
+      C <- "WD"
+      E <- "#C19A6B"
+    } else {
+      C <- "WW"
+      E <- "#6082B6"
+    }
+    D <- paste("QQplot of A", i, " GWAS analysis under ", C, " treatment.png", sep = "")
+    
+    # Assuming gwa_results is your dataset; replace this with your actual dataset
+    gwa_results <- get(A)
+    gwa_results$observed <- -log10(gwa_results$p)
+    gwa_results$expected <- -log10(ppoints(length(gwa_results$p), a = 1))
+    
+    Test <- ggplot(gwa_results) +
+      aes(x = expected, y = sort(observed, decreasing = TRUE)) +
+      geom_point(color = E) +  # Set the color directly
+      geom_abline() +
+      ggtitle(D)
+    
+    png(B, width = 800, height = 600)
+    print(Test)
+    dev.off()
+  }
+}
+
+data_list <- list()
+data_names <- unique(clean_IBS_C_PC0$Trait)
+for(i in 1:length(data_names)){
+  data <- subset(clean_IBS_C_PC0, clean_IBS_C_PC0$Trait == data_names[i])
+  data_list[[i]] <- data  # Assign each subset to the list
+}
+
+# Optionally, you can name the elements in the list for easier reference
+names(data_list) <- data_names
+
+
+for(i in 1:length(names(data_list))){
+  QQtest <- data_list[[i]]
+  QQtest$observed <- -log10(QQtest$p)
+  QQtest_sorted <- QQtest %>% arrange(desc(observed))
+  QQtest_sorted$expected <- -log10(ppoints(length(QQtest$p)))
+  if (i == 1) { # generate the combined_data frame
+    QQtest_data <- QQtest_sorted
+  } else { # add to the combined data frame
+    QQtest_data <- rbind(QQtest_data, QQtest_sorted)
+  }
+}
+QQtest_data <- QQtest_data %>%
+  left_join(traitkey, by = c("Trait" = "Assigned_Name"))
+
+# Replace 'Trait' with 'Shortname' from the key
+QQtest_data$Trait <- QQtest_data$Shortname
+
+nameplot <- paste0("All_WW_QQplot.png")
+QQtitle <- paste0("All-WW-QQ-plot")
+
+PLOT <- ggplot(QQtest_data, aes(x = expected, y = observed, color = Trait)) +
+  geom_point() +  # Color mapping happens here based on Trait
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +  
+  ggtitle(QQtitle) +  
+  theme_minimal() +
+  labs(x = "Expected -log10(p)", y = "Observed -log10(p)")
+ggsave(nameplot, plot = PLOT, width = 15, height = 10,dpi = 800)
+
+
+
+data_list <- list()
+data_names <- unique(clean_IBS_E_PC0$Trait)
+for(i in 1:length(data_names)){
+  data <- subset(clean_IBS_C_PC0, clean_IBS_C_PC0$Trait == data_names[i])
+  data_list[[i]] <- data  # Assign each subset to the list
+}
+
+# Optionally, you can name the elements in the list for easier reference
+names(data_list) <- data_names
+
+
+for(i in 1:length(names(data_list))){
+  QQtest <- data_list[[i]]
+  QQtest$observed <- -log10(QQtest$p)
+  QQtest_sorted <- QQtest %>% arrange(desc(observed))
+  QQtest_sorted$expected <- -log10(ppoints(length(QQtest$p)))
+  if (i == 1) { # generate the combined_data frame
+    QQtest_data <- QQtest_sorted
+  } else { # add to the combined data frame
+    QQtest_data <- rbind(QQtest_data, QQtest_sorted)
+  }
+}
+
+QQtest_data <- QQtest_data %>%
+  left_join(traitkey, by = c("Trait" = "Assigned_Name"))
+
+# Replace 'Trait' with 'Shortname' from the key
+QQtest_data$Trait <- QQtest_data$Shortname
+
+
+
+nameplot <- paste0("All_WD_QQplot.png")
+QQtitle <- paste0("All-WD-QQ-plot")
+
+PLOT <- ggplot(QQtest_data, aes(x = expected, y = observed, color = Trait)) +
+  geom_point() +  # Color mapping happens here based on Trait
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +  
+  ggtitle(QQtitle) +  
+  theme_minimal() +
+  labs(x = "Expected -log10(p)", y = "Observed -log10(p)")
+ggsave(nameplot, plot = PLOT, width = 15, height = 10,dpi = 800)
+
