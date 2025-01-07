@@ -1,0 +1,750 @@
+library(dplyr)
+# Import data
+project_name <- "Rice_Project_2024"
+species_name <- "Rice"
+
+EIO <- paste("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/", project_name, sep = "")
+PP <- paste(EIO, "/Data/Phenotypic_Data/", sep = "")
+rTASSEL_path <- paste(EIO, "/rTASSEL_output/", sep = "")
+PE0_data <- paste(rTASSEL_path, "Experimental/CSV/", sep = "")
+PC0_data <- paste(rTASSEL_path, "Control/CSV/", sep = "")
+output_folder <- paste(rTASSEL_path, "40QTL2/", sep = "")
+dir.create(output_folder)
+setwd(output_folder)
+
+# Data names
+all_IBS_C_PC0_path <- paste(PC0_data, "CON_AllGWAS_40MLM_stats.csv", sep = "")
+all_IBS_E_PC0_path <- paste(PE0_data, "EXP_AllGWAS_40MLM_stats.csv", sep = "")
+trait_path <- paste(PP, "Trait.key.txt", sep = "")
+
+all_IBS_C_PC0 <- read.csv(all_IBS_C_PC0_path)
+all_IBS_E_PC0 <- read.csv(all_IBS_E_PC0_path)
+trait <- read.table(trait_path, header = TRUE, sep = "\t")
+
+# Clean data
+clean_IBS_C_PC0 <- subset(all_IBS_C_PC0, !is.na(Chr))
+clean_IBS_E_PC0 <- subset(all_IBS_E_PC0, !is.na(Chr))
+
+clean_IBS_C_PC0$Chr <- factor(clean_IBS_C_PC0$Chr)
+clean_IBS_E_PC0$Chr <- factor(clean_IBS_E_PC0$Chr)
+
+# Setting p to log of p
+clean_IBS_C_PC0$p <- -log(clean_IBS_C_PC0$p, base = 10)
+clean_IBS_E_PC0$p <- -log(clean_IBS_E_PC0$p, base = 10)
+# Remove unneeded columns
+A <- clean_IBS_C_PC0$Trait
+B <- clean_IBS_C_PC0$Marker
+C <- clean_IBS_C_PC0$Chr
+D <- clean_IBS_C_PC0$Pos
+E <- clean_IBS_C_PC0$p
+clean.C <- data.frame(Trait = A, Marker = B, Chr = C, Pos = D, p = E)
+A <- clean_IBS_E_PC0$Trait
+B <- clean_IBS_E_PC0$Marker
+C <- clean_IBS_E_PC0$Chr
+D <- clean_IBS_E_PC0$Pos
+E <- clean_IBS_E_PC0$p
+clean.E <- data.frame(Trait = A, Marker = B, Chr = C, Pos = D, p = E)
+
+# Subset by Trait
+
+for (i in unique(clean.C$Trait)) {
+  A <- paste(i, ".clean.C", sep = "")
+  assign(A, subset(clean.C, grepl(paste0("\\b", i, "\\b"), Trait)))
+}
+for (i in unique(clean.E$Trait)) {
+  A <- paste(i, ".clean.E", sep = "")
+  assign(A, subset(clean.E, grepl(paste0("\\b", i, "\\b"), Trait)))
+}
+# Seperate baced on Chr
+for (i in unique(clean.C$Trait)) {
+  for (q in 1:12) {
+    A <- paste(i, ".clean.C", sep = "")
+    B <- paste(i, ".clean.C.Chr", q, sep = "")
+    if (exists(A)) {
+      assign(B, subset(get(A), grepl(paste0("\\b", q, "\\b"), Chr)))
+    } else {
+      next
+    }
+  }
+}
+# Seperate baced on Chr
+for (i in unique(clean.E$Trait)) {
+  for (q in 1:12) {
+    A <- paste(i, ".clean.E", sep = "")
+    B <- paste(i, ".clean.E.Chr", q, sep = "")
+    if (exists(A)) {
+      assign(B, subset(get(A), grepl(paste0("\\b", q, "\\b"), Chr)))
+    } else {
+      next
+    }
+  }
+}
+
+
+custom_t.test_group <- function(x) {
+  group <- rep(NA, length(x))
+  current_group <- 0
+  for (nX in 1:length(x)) {
+    # Check if the value is within 1e6 of any previous value in the same group
+    if (nX > 1 && abs(x[nX] - x[nX-1]) <= 1e5) {
+      group[nX] <- group[nX-1]
+    } else {
+      # If not within 1e6 of any previous value in the same group, assign a new group
+      current_group <- current_group + 1
+      group[nX] <- current_group
+    }
+  }
+  return(group)
+}
+LD <- 100000
+thresshold <- 0.05
+numberofmarkers <- 46999
+bf <- -log10(0.05/46999)
+
+for (i in unique(clean.E$Trait)) {
+  QTLnumber <- 0  # Initialize QTL per Trait
+  for (q in 1:12) {
+    Original_Data_Frame_name <- paste(i, ".clean.E.Chr", q, sep = "")# Trait per Chr
+    if (exists(Original_Data_Frame_name)) { # Check if there is a Data frame
+      Original_Data_Frame <- get(Original_Data_Frame_name) # If Data frame is present Grab the Data frame
+      num_potental_msSNP <- sum(Original_Data_Frame$p > 4)
+      for(points in 1:num_potental_msSNP){
+        max_value <- max(Original_Data_Frame$p) # Find the most significant SNP (msSNP) for QTL labeling
+        if(max_value < 4){ # If the msSNP doesn't make the lowest thresshold for QTL move to next Chr/Trait
+          next # move to next Chr or Trait !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        }else{
+          num_max_value <- sum(Original_Data_Frame$p == max_value) # Check if there are multiple msSNP
+          if (num_max_value == 1) { # If there is only one msSNP
+            SNPrn <- which(Original_Data_Frame$p == max_value) # Find the row inwhich the msSNP can be found
+            POS <- Original_Data_Frame$Pos[SNPrn] # Finding the possition of smSNP on the respective Chr
+            NPOS <- POS - LD # Finding the Linkage Disequilibrum (LD) farthest extent up the Chr
+            PPOS <- POS + LD # Finding the Linkage Disequilibrum (LD) farthest extent down the Chr
+            subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # grab the portion of the Chr that is possably the QTL.
+            count_above_4 <- sum(subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+            if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+              QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+              Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Data_Frame) # removing QTL from Original dataframe to stop an infanent loop
+              subset_Data_Frame$QTLsig <- ifelse(max_value > bf, "High", ifelse(max_value > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+              QTLmarker <- paste("Chr",q,".Pos",POS,sep = "") # Generating Shared QTLmarker name
+              subset_Data_Frame$QTLnam <- paste(subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # inserting Shared QTLmarker name into dataframe
+              subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+              subset_Data_Frame$QTLsnp <- ifelse(subset_Data_Frame$p == max_value, "msSNP", "SNP") # documenting which SNP is the msSNP or not the msSNP
+              QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+              if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Data_Frame))
+              } else {
+                assign(QTL_Data_Frame_name, data.frame(subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+              }
+            } else {
+              Original_Data_Frame <- Original_Data_Frame[-SNPrn, ] # remove the msSNP it it isn't a QTL and start over from Chr/Trait.
+            }
+          } else if (num_max_value > 1) { # if there are several msSNP detected
+            Processing_Data_Frame <- subset(Original_Data_Frame, grepl(paste0("\\b", max_value, "\\b"), Original_Data_Frame$p)) #seperate the msSNPs from the original data frame.
+            df1 <- custom_t.test_group(Processing_Data_Frame$Pos) # Utilising the (Custom_group_function) to determin if the msSNPs are part of the same QTL or a seprate QTL on the same Chr.
+            Processing_Data_Frame$group <- df1
+            UniqueGroupnumber <- length(unique(Processing_Data_Frame$group)) # determining the number of msSNPs that are not within 100kbp from one another.
+            if (UniqueGroupnumber > 1) { # If there are mutliple possible QTLs that share the same p value of msSNP.
+              for (j in UniqueGroupnumber) { # the loop must be interated over each possible QTL
+                Group_Subset_Data_Frame_name <- paste(Original_Data_Frame_name, ".Group", j, sep = "") # naming the respected possible QTL groups (rpQTL).
+                assign(Group_Subset_Data_Frame_name, subset(Processing_Data_Frame, grepl(paste0("\\b", j, "\\b"), Processing_Data_Frame$group))) # further subset the msSNPs into thier rpQTL.
+                Group_Subset_Data_Frame <- get(Group_Subset_Data_Frame_name) # Grabbing the data frame of the rpQTL
+                SNPrn <- nrow(Group_Subset_Data_Frame) # Determining the number msSNPS in rpQTL.
+                if (SNPrn == 1) { # If there is only one msSNPs in rpQTL.
+                  POS <- Group_Subset_Data_Frame$Pos # Finding the possition of smSNP on the respective Chr 
+                  NPOS <- POS - LD # Finding the Linkage Disequilibrum (LD) farthest extent up the Chr
+                  PPOS <- POS + LD # Finding the Linkage Disequilibrum (LD) farthest extent down the Chr
+                  subset_Original_Data_Frame_Group <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # extract the QTL from the original datafrme
+                  count_above_4 <- sum(subset_Original_Data_Frame_Group$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+                  if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                    QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                    Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Original_Data_Frame_Group)# removing QTL from Original dataframe to stop an infanent loop 
+                    subset_Original_Data_Frame_Group$QTLsig <- ifelse(subset_Original_Data_Frame_Group$p > bf, "High", ifelse(subset_Original_Data_Frame_Group$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                    QTLmarker <- paste("Chr",q,".Pos",POS,sep = "") # Generating Shared QTLmarker name
+                    subset_Original_Data_Frame_Group$QTLnam <- paste(subset_Original_Data_Frame_Group$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # inserting Shared QTLmarker name into dataframe
+                    subset_Original_Data_Frame_Group$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                    subset_Original_Data_Frame_Group$QTLsnp <- ifelse(subset_Original_Data_Frame_Group$p == max_value, "msSNP", "SNP") # documenting which SNP is the msSNP or not the msSNP
+                    QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                    if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                      QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                      assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Original_Data_Frame_Group))
+                    } else {
+                      assign(QTL_Data_Frame_name, data.frame(subset_Original_Data_Frame_Group)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                    }
+                  } else {
+                    Original_Data_Frame <- Original_Data_Frame[-SNPrn, ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+                  }
+                } else { # If there are multiple msSNPs in rpQTL
+                  averagepos <- mean(Group_Subset_Data_Frame$Pos) # finding an extimated center possion of QTL
+                  NPOS <- (min(Group_Subset_Data_Frame$Pos) - LD) # determining the farthest down the Chromosome the QTL extends
+                  PPOS <- (max(Group_Subset_Data_Frame$Pos) + LD) # determining the farthest up the Chromosome the QTL extends
+                  Group_Original_Subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # extract the QTL from the original datafrme
+                  count_above_4 <- sum(Group_Original_Subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+                  if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                    QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                    Original_Data_Frame <- anti_join(Original_Data_Frame, Group_Original_Subset_Data_Frame)# removing QTL from Original dataframe to stop an infanent loop
+                    Group_Original_Subset_Data_Frame$QTLsig <- ifelse(Group_Original_Subset_Data_Frame$p > bf, "High", ifelse(Group_Original_Subset_Data_Frame$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                    QTLmarker <- paste("Chr",q,".Pos",averagepos,"Avg",sep = "") # Generating Shared average QTLmarker name 
+                    Group_Original_Subset_Data_Frame$QTLnam <- paste(Group_Original_Subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # QTL name is baced on Trait, Genetic Marker, and the QTLnumber.
+                    Group_Original_Subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                    Group_Original_Subset_Data_Frame$QTLsnp <- ifelse(Group_Original_Subset_Data_Frame$p == max_value, "ind.msSNP", "SNP") # documenting which SNP is the ind.msSNP (individual.msSNP) or not the msSNP
+                    newQTLrow <- data.frame( # Generating a new QTLrow to store the average QTL SNP data
+                      Trait = i, # Same
+                      Marker = paste(i, ".", QTLmarker, ".QTL", QTLnumber,"Avg",sep = ""), # Differ by average
+                      Chr = q, # Same
+                      Pos = averagepos, # Differ by average
+                      p = max_value, # Same as the max p value.
+                      QTLsig = Group_Original_Subset_Data_Frame$QTLsig[1], # Same
+                      QTLnam = Group_Original_Subset_Data_Frame$QTLnam[1], # Same
+                      QTLnum = Group_Original_Subset_Data_Frame$QTLnum[1], # Same
+                      QTLsnp = "avg.msSNP" # it is a average msSNP
+                    )
+                    Group_Original_Subset_Data_Frame <- rbind(newQTLrow,Group_Original_Subset_Data_Frame) # adding of Average msSNP to DataFrame
+                    QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                    print(QTL_Data_Frame_name)
+                    if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                      QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                      print(QTL_Data_Frame[1,])
+                      assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, Group_Original_Subset_Data_Frame))
+                    } else {
+                      assign(QTL_Data_Frame_name, data.frame(Group_Original_Subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                    }
+                  } else {
+                    Original_Data_Frame <- Original_Data_Frame[!(
+                      Original_Data_Frame[, 1:5] %in% Processing_Data_Frame[, 1:5]), ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+                  }
+                }
+              }
+            } else {# If there is only one QTL with multiple msSNPs
+              averagepos <- mean(Processing_Data_Frame$Pos) # Find the average chromosome position between msSNPs
+              NPOS <- (min(Processing_Data_Frame$Pos) - LD) # determining the farthest down the Chromosome the QTL extends 
+              PPOS <- (max(Processing_Data_Frame$Pos) + LD) # determining the farthest up the Chromosome the QTL extends
+              subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # Grabbing QTL from Original data frame
+              count_above_4 <- sum(subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+              if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Data_Frame)# removing QTL from Original dataframe to stop an infanent loop
+                subset_Data_Frame$QTLsig <- ifelse(subset_Data_Frame$p > bf, "High", ifelse(subset_Data_Frame$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                QTLmarker <- paste("Chr",q,".Pos",averagepos,"Avg",sep = "") # Generating Shared average QTLmarker name 
+                subset_Data_Frame$QTLnam <- paste(subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # QTL name is baced on Trait, Genetic Marker, and the QTLnumber.
+                subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                subset_Data_Frame$QTLsnp <- ifelse(subset_Data_Frame$p == max_value, "ind.msSNP", "SNP") # documenting which SNP is the ind.msSNP (individual.msSNP) or not the msSNP
+                newQTLrow <- data.frame( # Generating a new QTLrow to store the average QTL SNP data
+                  Trait = i, # Same
+                  Marker = paste(i, ".", QTLmarker, ".QTL", QTLnumber,"Avg",sep = ""), # Differ by average
+                  Chr = q, # Same
+                  Pos = averagepos, # Differ by average
+                  p = max_value, # Same as the max p value.
+                  QTLsig = subset_Data_Frame$QTLsig[1], # Same
+                  QTLnam = subset_Data_Frame$QTLnam[1], # Same
+                  QTLnum = subset_Data_Frame$QTLnum[1], # Same
+                  QTLsnp = "avg.msSNP" # it is a average msSNP
+                )
+                subset_Data_Frame <- rbind(newQTLrow,subset_Data_Frame) # adding of Average msSNP to DataFrame
+                QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                  QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                  assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Data_Frame))
+                } else {
+                  assign(QTL_Data_Frame_name, data.frame(subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                }
+              } else {
+                Original_Data_Frame <- Original_Data_Frame[!(
+                  Original_Data_Frame[, 1:5] %in% Processing_Data_Frame[, 1:5]), ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+for (i in unique(clean.C$Trait)) {
+  QTLnumber <- 0  # Initialize QTL per Trait
+  for (q in 1:12) {
+    Original_Data_Frame_name <- paste(i, ".clean.C.Chr", q, sep = "")# Trait per Chr
+    if (exists(Original_Data_Frame_name)) { # Check if there is a Data frame
+      Original_Data_Frame <- get(Original_Data_Frame_name) # If Data frame is present Grab the Data frame
+      num_potental_msSNP <- sum(Original_Data_Frame$p > 4)
+      for(points in 1:num_potental_msSNP){
+        max_value <- max(Original_Data_Frame$p) # Find the most significant SNP (msSNP) for QTL labeling
+        if(max_value < 4){ # If the msSNP doesn't make the lowest thresshold for QTL move to next Chr/Trait
+          next # move to next Chr or Trait !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        }else{
+          num_max_value <- sum(Original_Data_Frame$p == max_value) # Check if there are multiple msSNP
+          if (num_max_value == 1) { # If there is only one msSNP
+            SNPrn <- which(Original_Data_Frame$p == max_value) # Find the row inwhich the msSNP can be found
+            POS <- Original_Data_Frame$Pos[SNPrn] # Finding the possition of smSNP on the respective Chr
+            NPOS <- POS - LD # Finding the Linkage Disequilibrum (LD) farthest extent up the Chr
+            PPOS <- POS + LD # Finding the Linkage Disequilibrum (LD) farthest extent down the Chr
+            subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # grab the portion of the Chr that is possably the QTL.
+            count_above_4 <- sum(subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+            if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+              QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+              Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Data_Frame) # removing QTL from Original dataframe to stop an infanent loop
+              subset_Data_Frame$QTLsig <- ifelse(max_value > bf, "High", ifelse(max_value > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+              QTLmarker <- paste("Chr",q,".Pos",POS,sep = "") # Generating Shared QTLmarker name
+              subset_Data_Frame$QTLnam <- paste(subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # inserting Shared QTLmarker name into dataframe
+              subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+              subset_Data_Frame$QTLsnp <- ifelse(subset_Data_Frame$p == max_value, "msSNP", "SNP") # documenting which SNP is the msSNP or not the msSNP
+              QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+              if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Data_Frame))
+              } else {
+                assign(QTL_Data_Frame_name, data.frame(subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+              }
+            } else {
+              Original_Data_Frame <- Original_Data_Frame[-SNPrn, ] # remove the msSNP it it isn't a QTL and start over from Chr/Trait.
+            }
+          } else if (num_max_value > 1) { # if there are several msSNP detected
+            Processing_Data_Frame <- subset(Original_Data_Frame, grepl(paste0("\\b", max_value, "\\b"), Original_Data_Frame$p)) #seperate the msSNPs from the original data frame.
+            df1 <- custom_t.test_group(Processing_Data_Frame$Pos) # Utilising the (Custom_group_function) to determin if the msSNPs are part of the same QTL or a seprate QTL on the same Chr.
+            Processing_Data_Frame$group <- df1
+            UniqueGroupnumber <- length(unique(Processing_Data_Frame$group)) # determining the number of msSNPs that are not within 100kbp from one another.
+            if (UniqueGroupnumber > 1) { # If there are mutliple possible QTLs that share the same p value of msSNP.
+              for (j in UniqueGroupnumber) { # the loop must be interated over each possible QTL
+                Group_Subset_Data_Frame_name <- paste(Original_Data_Frame_name, ".Group", j, sep = "") # naming the respected possible QTL groups (rpQTL).
+                assign(Group_Subset_Data_Frame_name, subset(Processing_Data_Frame, grepl(paste0("\\b", j, "\\b"), Processing_Data_Frame$group))) # further subset the msSNPs into thier rpQTL.
+                Group_Subset_Data_Frame <- get(Group_Subset_Data_Frame_name) # Grabbing the data frame of the rpQTL
+                SNPrn <- nrow(Group_Subset_Data_Frame) # Determining the number msSNPS in rpQTL.
+                if (SNPrn == 1) { # If there is only one msSNPs in rpQTL.
+                  POS <- Group_Subset_Data_Frame$Pos # Finding the possition of smSNP on the respective Chr 
+                  NPOS <- POS - LD # Finding the Linkage Disequilibrum (LD) farthest extent up the Chr
+                  PPOS <- POS + LD # Finding the Linkage Disequilibrum (LD) farthest extent down the Chr
+                  subset_Original_Data_Frame_Group <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # extract the QTL from the original datafrme
+                  count_above_4 <- sum(subset_Original_Data_Frame_Group$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+                  if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                    QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                    Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Original_Data_Frame_Group)# removing QTL from Original dataframe to stop an infanent loop 
+                    subset_Original_Data_Frame_Group$QTLsig <- ifelse(subset_Original_Data_Frame_Group$p > bf, "High", ifelse(subset_Original_Data_Frame_Group$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                    QTLmarker <- paste("Chr",q,".Pos",POS,sep = "") # Generating Shared QTLmarker name
+                    subset_Original_Data_Frame_Group$QTLnam <- paste(subset_Original_Data_Frame_Group$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # inserting Shared QTLmarker name into dataframe
+                    subset_Original_Data_Frame_Group$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                    subset_Original_Data_Frame_Group$QTLsnp <- ifelse(subset_Original_Data_Frame_Group$p == max_value, "msSNP", "SNP") # documenting which SNP is the msSNP or not the msSNP
+                    QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                    if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                      QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                      assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Original_Data_Frame_Group))
+                    } else {
+                      assign(QTL_Data_Frame_name, data.frame(subset_Original_Data_Frame_Group)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                    }
+                  } else {
+                    Original_Data_Frame <- Original_Data_Frame[-SNPrn, ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+                  }
+                } else { # If there are multiple msSNPs in rpQTL
+                  averagepos <- mean(Group_Subset_Data_Frame$Pos) # finding an extimated center possion of QTL
+                  NPOS <- (min(Group_Subset_Data_Frame$Pos) - LD) # determining the farthest down the Chromosome the QTL extends
+                  PPOS <- (max(Group_Subset_Data_Frame$Pos) + LD) # determining the farthest up the Chromosome the QTL extends
+                  Group_Original_Subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # extract the QTL from the original datafrme
+                  count_above_4 <- sum(Group_Original_Subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+                  if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                    QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                    Original_Data_Frame <- anti_join(Original_Data_Frame, Group_Original_Subset_Data_Frame)# removing QTL from Original dataframe to stop an infanent loop
+                    Group_Original_Subset_Data_Frame$QTLsig <- ifelse(Group_Original_Subset_Data_Frame$p > bf, "High", ifelse(Group_Original_Subset_Data_Frame$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                    QTLmarker <- paste("Chr",q,".Pos",averagepos,"Avg",sep = "") # Generating Shared average QTLmarker name 
+                    Group_Original_Subset_Data_Frame$QTLnam <- paste(Group_Original_Subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # QTL name is baced on Trait, Genetic Marker, and the QTLnumber.
+                    Group_Original_Subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                    Group_Original_Subset_Data_Frame$QTLsnp <- ifelse(Group_Original_Subset_Data_Frame$p == max_value, "ind.msSNP", "SNP") # documenting which SNP is the ind.msSNP (individual.msSNP) or not the msSNP
+                    newQTLrow <- data.frame( # Generating a new QTLrow to store the average QTL SNP data
+                      Trait = i, # Same
+                      Marker = paste(i, ".", QTLmarker, ".QTL", QTLnumber,"Avg",sep = ""), # Differ by average
+                      Chr = q, # Same
+                      Pos = averagepos, # Differ by average
+                      p = max_value, # Same as the max p value.
+                      QTLsig = Group_Original_Subset_Data_Frame$QTLsig[1], # Same
+                      QTLnam = Group_Original_Subset_Data_Frame$QTLnam[1], # Same
+                      QTLnum = Group_Original_Subset_Data_Frame$QTLnum[1], # Same
+                      QTLsnp = "avg.msSNP" # it is a average msSNP
+                    )
+                    Group_Original_Subset_Data_Frame <- rbind(newQTLrow,Group_Original_Subset_Data_Frame) # adding of Average msSNP to DataFrame
+                    QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                    print(QTL_Data_Frame_name)
+                    if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                      QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                      print(QTL_Data_Frame[1,])
+                      assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, Group_Original_Subset_Data_Frame))
+                    } else {
+                      assign(QTL_Data_Frame_name, data.frame(Group_Original_Subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                    }
+                  } else {
+                    Original_Data_Frame <- Original_Data_Frame[!(
+                      Original_Data_Frame[, 1:5] %in% Processing_Data_Frame[, 1:5]), ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+                  }
+                }
+              }
+            } else {# If there is only one QTL with multiple msSNPs
+              averagepos <- mean(Processing_Data_Frame$Pos) # Find the average chromosome position between msSNPs
+              NPOS <- (min(Processing_Data_Frame$Pos) - LD) # determining the farthest down the Chromosome the QTL extends 
+              PPOS <- (max(Processing_Data_Frame$Pos) + LD) # determining the farthest up the Chromosome the QTL extends
+              subset_Data_Frame <- subset(Original_Data_Frame, Pos >= NPOS & Pos <= PPOS) # Grabbing QTL from Original data frame
+              count_above_4 <- sum(subset_Data_Frame$p > 3.5) # Counting the number of SNPs that are above the low significant thresshold
+              if (count_above_4 >= 3) { # there must be atlest 2 other signifcant SNP (sSNP) with the msSNP to be considered a QTL.(three including msSNP)
+                QTLnumber <- QTLnumber + 1 # (WE Found a QTL) Documenting each QTL, for a specific trait, with a Unique number.
+                Original_Data_Frame <- anti_join(Original_Data_Frame, subset_Data_Frame)# removing QTL from Original dataframe to stop an infanent loop
+                subset_Data_Frame$QTLsig <- ifelse(subset_Data_Frame$p > bf, "High", ifelse(subset_Data_Frame$p > 5, "Medium", "Low")) # Documenting level of singicance baced of of msSNP
+                QTLmarker <- paste("Chr",q,".Pos",averagepos,"Avg",sep = "") # Generating Shared average QTLmarker name 
+                subset_Data_Frame$QTLnam <- paste(subset_Data_Frame$Trait, ".", QTLmarker, ".QTL", QTLnumber, sep = "") # QTL name is baced on Trait, Genetic Marker, and the QTLnumber.
+                subset_Data_Frame$QTLnum <- paste(QTLnumber, sep = "") # Creating an aditional column just for the QTL number
+                subset_Data_Frame$QTLsnp <- ifelse(subset_Data_Frame$p == max_value, "ind.msSNP", "SNP") # documenting which SNP is the ind.msSNP (individual.msSNP) or not the msSNP
+                newQTLrow <- data.frame( # Generating a new QTLrow to store the average QTL SNP data
+                  Trait = i, # Same
+                  Marker = paste(i, ".", QTLmarker, ".QTL", QTLnumber,"Avg",sep = ""), # Differ by average
+                  Chr = q, # Same
+                  Pos = averagepos, # Differ by average
+                  p = max_value, # Same as the max p value.
+                  QTLsig = subset_Data_Frame$QTLsig[1], # Same
+                  QTLnam = subset_Data_Frame$QTLnam[1], # Same
+                  QTLnum = subset_Data_Frame$QTLnum[1], # Same
+                  QTLsnp = "avg.msSNP" # it is a average msSNP
+                )
+                subset_Data_Frame <- rbind(newQTLrow,subset_Data_Frame) # adding of Average msSNP to DataFrame
+                QTL_Data_Frame_name <- paste(Original_Data_Frame_name, ".QTL", sep = "") # the QTL Data will be stored in a dataframe called Trait.clean.treatment.Chromosome.QTL
+                if (exists(QTL_Data_Frame_name)) { # To check if QTL dataframe allready exists (so that data will not be written over)
+                  QTL_Data_Frame <- get(QTL_Data_Frame_name) # rbind dataframes if QTL dataframe allready exists
+                  assign(QTL_Data_Frame_name, rbind(QTL_Data_Frame, subset_Data_Frame))
+                } else {
+                  assign(QTL_Data_Frame_name, data.frame(subset_Data_Frame)) # create a new QTL dataframe with subset data if one dosn't allready exists
+                }
+              } else {
+                Original_Data_Frame <- Original_Data_Frame[!(
+                  Original_Data_Frame[, 1:5] %in% Processing_Data_Frame[, 1:5]), ] # remove the msSNP from the Original dataframe, it isn't a QTL, and start over from j/Chr/Trait.
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+
+for (i in unique(clean.E$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.E.Chr", q, ".QTL", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(i, ".clean.E.QTL.ALL", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        Total_QTLDF <- rbind(Total_QTLDF, QTLDF)
+        assign(Total_QTL, Total_QTLDF)
+      } else {
+        assign(Total_QTL, QTLDF)
+      }
+    }
+  }
+}
+
+for (i in unique(clean.C$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.C.Chr", q, ".QTL", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(i, ".clean.C.QTL.ALL", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        Total_QTLDF <- rbind(Total_QTLDF, QTLDF)
+        assign(Total_QTL, Total_QTLDF)
+      } else {
+        assign(Total_QTL, QTLDF)
+      }
+    }
+  }
+}
+interactions <- 1
+Total_QTL_Experimental <- NULL
+
+for (i in unique(clean.E$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.E.QTL.ALL", sep = "")
+  
+  if (exists(Total_QTL_Trait)) {
+    Total_QTL_Traitdf <- get(Total_QTL_Trait)
+    
+    if (interactions == 1) {
+      Total_QTL_Experimental <- Total_QTL_Traitdf
+      interactions <- interactions + 1
+    } else {
+      Total_QTL_Experimental <- rbind(Total_QTL_Experimental, Total_QTL_Traitdf)
+    }
+  }
+}
+
+
+
+interactions <- 1
+Total_QTL_Control <- NULL
+for (i in unique(clean.C$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.C.QTL.ALL", sep = "")
+  
+  if (exists(Total_QTL_Trait)) {
+    Total_QTL_Traitdf <- get(Total_QTL_Trait)
+    
+    if (interactions == 1) {
+      Total_QTL_Control <- Total_QTL_Traitdf
+      interactions <- interactions + 1
+    } else {
+      Total_QTL_Control <- rbind(Total_QTL_Control, Total_QTL_Traitdf)
+    }
+  }
+}
+
+subset_cols <- (names(Total_QTL_Control) %in% c("Trait", "Chr", "Pos"))
+duplicated_rows <- duplicated(Total_QTL_Control[, subset_cols])
+clean_Total_QTL_Control <- Total_QTL_Control[!duplicated_rows, ]
+
+subset_cols <- (names(Total_QTL_Experimental) %in% c("Trait", "Chr", "Pos"))
+duplicated_rows <- duplicated(Total_QTL_Experimental[, subset_cols])
+clean_Total_QTL_Experimental <- Total_QTL_Experimental[!duplicated_rows, ]
+
+CSV_CON_output <-paste(output_folder,"Total.Control(40).QTL.csv", sep="")
+result_ALLGWAS_C <- clean_Total_QTL_Control
+write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+
+CSV_CON_output <-paste(output_folder,"Total.Experimental(40).QTL.csv", sep="")
+result_ALLGWAS_C <- clean_Total_QTL_Experimental
+write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+
+
+for (i in unique(clean.C$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.C.QTL.ALL", sep = "")
+  if(exists(Total_QTL_Trait)){
+    Test <- get(Total_QTL_Trait)
+    subset_cols <- (names(Test) %in% c("Trait", "Chr", "Pos"))
+    duplicated_rows <- duplicated(Test[, subset_cols])
+    test <- Test[!duplicated_rows, ]
+    CSV_CON_output <-paste(output_folder,"Control.individuals/",Total_QTL_Trait,"(40).csv", sep="")
+    result_ALLGWAS_C <- Test
+    write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+  }
+}
+
+for (i in unique(clean.E$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.E.QTL.ALL", sep = "")
+  if(exists(Total_QTL_Trait)){
+    Test <- get(Total_QTL_Trait)
+    subset_cols <- (names(Test) %in% c("Trait", "Chr", "Pos"))
+    duplicated_rows <- duplicated(Test[, subset_cols])
+    test <- Test[!duplicated_rows, ]
+    CSV_CON_output <-paste(output_folder,"Experimental.individuals/",Total_QTL_Trait,"(40).csv", sep="")
+    result_ALLGWAS_C <- Test
+    write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+  }
+}
+   
+
+for (i in unique(clean.E$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.E.Chr", q, ".QTL", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(QTL, ".msSNP.only(40)", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        if (any(QTLDF == "avg.msSNP", na.rm = TRUE)) {
+          avQTLDF <- subset(QTLDF, grepl(paste0("\\b", "avg.msSNP", "\\b"), QTLsnp))
+          if (any(QTLDF == "msSNP", na.rm = TRUE)) {
+            msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+            Total_QTLDF <- rbind(Total_QTLDF, avQTLDF)
+            Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+          } else {
+            Total_QTLDF <- rbind(Total_QTLDF, avQTLDF)
+          }
+        } else {
+          msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+          Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+        }
+      } else {
+        if (any(QTLDF == "avg.msSNP", na.rm = TRUE)) {
+          avQTLDF <- subset(QTLDF, grepl(paste0("\\b", "avg.msSNP", "\\b"), QTLsnp))
+          if (any(QTLDF == "msSNP", na.rm = TRUE)) {
+            msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+            assign(Total_QTL, avQTLDF)
+            Total_QTLDF <- get(Total_QTL)
+            Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+          } else {
+            assign(Total_QTL, avQTLDF)
+          }
+        } else {
+          msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+          assign(Total_QTL, msQTLDF)
+        }
+      }
+    }
+  }
+}
+
+
+for (i in unique(clean.E$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.E.Chr", q, ".QTL.msSNP.only(40)", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(i, ".clean.E.QTL.ALL.msSNP.only(40)", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        Total_QTLDF <- rbind(Total_QTLDF, QTLDF)
+        assign(Total_QTL, Total_QTLDF)
+      } else {
+        assign(Total_QTL, QTLDF)
+      }
+    }
+  }
+}
+
+
+interactions <- 1
+Total_msSNP_QTL_Experimental <- NULL
+
+for (i in unique(clean.E$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.E.QTL.ALL.msSNP.only(40)", sep = "")
+  
+  if (exists(Total_QTL_Trait)) {
+    Total_QTL_Traitdf <- get(Total_QTL_Trait)
+    
+    if (interactions == 1) {
+      Total_msSNP_QTL_Experimental <- Total_QTL_Traitdf
+      interactions <- interactions + 1
+    } else {
+      Total_msSNP_QTL_Experimental <- rbind(Total_msSNP_QTL_Experimental, Total_QTL_Traitdf)
+    }
+  }
+}
+
+
+for (i in unique(clean.C$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.C.Chr", q, ".QTL", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(QTL, ".msSNP.only(40)", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        if (any(QTLDF == "avg.msSNP", na.rm = TRUE)) {
+          avQTLDF <- subset(QTLDF, grepl(paste0("\\b", "avg.msSNP", "\\b"), QTLsnp))
+          if (any(QTLDF == "msSNP", na.rm = TRUE)) {
+            msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+            Total_QTLDF <- rbind(Total_QTLDF, avQTLDF)
+            Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+          } else {
+            Total_QTLDF <- rbind(Total_QTLDF, avQTLDF)
+          }
+        } else {
+          msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+          Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+        }
+      } else {
+        if (any(QTLDF == "avg.msSNP", na.rm = TRUE)) {
+          avQTLDF <- subset(QTLDF, grepl(paste0("\\b", "avg.msSNP", "\\b"), QTLsnp))
+          if (any(QTLDF == "msSNP", na.rm = TRUE)) {
+            msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+            assign(Total_QTL, avQTLDF)
+            Total_QTLDF <- get(Total_QTL)
+            Total_QTLDF <- rbind(Total_QTLDF, msQTLDF)
+          } else {
+            assign(Total_QTL, avQTLDF)
+          }
+        } else {
+          msQTLDF <- subset(QTLDF, grepl(paste0("\\b", "msSNP", "\\b"), QTLsnp))
+          assign(Total_QTL, msQTLDF)
+        }
+      }
+    }
+  }
+}
+
+
+for (i in unique(clean.C$Trait)) {
+  for (q in 1:12) {
+    QTL <- paste(i, ".clean.C.Chr", q, ".QTL.msSNP.only(40)", sep = "")
+    if (exists(QTL)) {
+      QTLDF <- get(QTL)
+      Total_QTL <- paste(i, ".clean.C.QTL.ALL.msSNP.only(40)", sep = "")
+      if (exists(Total_QTL)) {
+        Total_QTLDF <- get(Total_QTL)
+        Total_QTLDF <- rbind(Total_QTLDF, QTLDF)
+        assign(Total_QTL, Total_QTLDF)
+      } else {
+        assign(Total_QTL, QTLDF)
+      }
+    }
+  }
+}
+
+
+interactions <- 1
+Total_msSNP_QTL_Control <- NULL
+
+for (i in unique(clean.C$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.C.QTL.ALL.msSNP.only(40)", sep = "")
+  
+  if (exists(Total_QTL_Trait)) {
+    Total_QTL_Traitdf <- get(Total_QTL_Trait)
+    
+    if (interactions == 1) {
+      Total_msSNP_QTL_Control <- Total_QTL_Traitdf
+      interactions <- interactions + 1
+    } else {
+      Total_msSNP_QTL_Control <- rbind(Total_msSNP_QTL_Control, Total_QTL_Traitdf)
+    }
+  }
+}
+
+
+# clean unintened duplicated QTLs
+subset_cols <- (names(Total_msSNP_QTL_Control) %in% c("Trait", "Chr", "Pos"))
+duplicated_rows <- duplicated(Total_msSNP_QTL_Control[, subset_cols])
+clean_Total_msSNP_QTL_Control <- Total_msSNP_QTL_Control[!duplicated_rows, ]
+
+subset_cols <- (names(Total_msSNP_QTL_Experimental) %in% c("Trait", "Chr", "Pos"))
+duplicated_rows <- duplicated(Total_msSNP_QTL_Experimental[, subset_cols])
+clean_Total_msSNP_QTL_Experimental <- Total_msSNP_QTL_Experimental[!duplicated_rows, ]
+
+
+
+
+CSV_CON_output <-paste(output_folder,"Total.clean.msSNP.QTL(40).Control.csv", sep="")
+result_ALLGWAS_C <- clean_Total_msSNP_QTL_Control
+write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+
+CSV_CON_output <-paste(output_folder,"Total.clean.msSNP.QTL(40).Experimental.QTL.csv", sep="")
+result_ALLGWAS_C <- clean_Total_msSNP_QTL_Experimental
+write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+
+
+for (i in unique(clean.C$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.C.QTL.ALL.msSNP.only(40)", sep = "")
+  if(exists(Total_QTL_Trait)){
+    Test <- get(Total_QTL_Trait)
+    subset_cols <- (names(Test) %in% c("Trait", "Chr", "Pos"))
+    duplicated_rows <- duplicated(Test[, subset_cols])
+    test <- Test[!duplicated_rows, ]
+    CSV_CON_output <-paste(output_folder,"Control.msSNPs.only/",Total_QTL_Trait,".csv", sep="")
+    result_ALLGWAS_C <- test
+    write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+  }
+}
+
+for (i in unique(clean.E$Trait)) {
+  Total_QTL_Trait <- paste(i, ".clean.E.QTL.ALL.msSNP.only(40)", sep = "")
+  if(exists(Total_QTL_Trait)){
+    Test <- get(Total_QTL_Trait)
+    subset_cols <- (names(Test) %in% c("Trait", "Chr", "Pos"))
+    duplicated_rows <- duplicated(Test[, subset_cols])
+    test <- Test[!duplicated_rows, ]
+    CSV_CON_output <-paste(output_folder,"Experimental.msSNPs.only/",Total_QTL_Trait,".csv", sep="")
+    result_ALLGWAS_C <- test
+    write.csv(result_ALLGWAS_C, CSV_CON_output, row.names = FALSE)
+  }
+}
+
+
+
+
