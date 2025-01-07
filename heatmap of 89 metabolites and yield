@@ -1,0 +1,143 @@
+
+###############################Install and load packages########################
+install.packages("gplots")
+install.packages("ape")
+install.packages("viridis")
+
+
+library("viridis")
+library(gplots)
+library(ape)
+library(stats)
+library(dplyr)
+
+##############################Variables#########################################
+Yeild <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Additional_Data/Yeild.txt", header = TRUE)
+Metabolics <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Additional_Data/Metabolics.txt", header = TRUE)
+QTL_list <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Additional_Data/QTL_list.txt", sep = "\t", header = TRUE)
+traitkey <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Phenotypic_Data/Trait.key.txt", sep = "\t", header = TRUE)
+DESIGNATION <- read.csv("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Additional_Data/DESIGNATION.csv", sep = "\t", header = TRUE)
+QTLi <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Phenotypic_Data/Rice_Pheno_TASSEL_EXP.QTLi.txt", sep = "\t", header = TRUE)
+Chromosome_numbers <- c(1,4,11)
+outputfolder <- "C:/Users/lczacktd/Desktop/"
+
+# formating QTLi
+colnames(QTLi) <- QTLi[2,]
+QTLi <-  QTLi[3:nrow( QTLi),]
+# LOOPING CODE!
+for(iteration in 1:length(Chromosome_numbers)){
+# formatting
+Chromosome_number <-Chromosome_numbers[iteration]
+GY <- Yeild$GYCON
+a <- paste0("QTLi.",Chromosome_number)
+b <- which(colnames(QTL_list) == a)
+traitkeysub <- subset(traitkey, Shortname %in% QTL_list[,b])
+WD <- subset(Metabolics,Treatment == "WD")
+MetWD <- WD[,3:ncol(WD)]
+q <- traitkeysub$Assigned_Name
+w <- traitkeysub$Shortname
+s <- which(colnames( QTLi) == paste0("QTLi",Chromosome_number))
+s <- QTLi[,s]
+Met <- MetWD[,q]
+colnames(Met) <- w
+formating <- cbind(WD[,1:2],DESIGNATION,GY,s,Met)
+colnames(formating)[5] <- "PC1"
+formating$GY <- as.numeric(formating$GY)
+formating$PC1 <- as.numeric(formating$PC1)
+oxi_data_GY_DRO <- formating
+oxi_data_GY_cor_DRO <- dplyr::select(oxi_data_GY_DRO, -taxa, -DESIGNATION, -Treatment) %>%
+  cor(use = "pairwise.complete.obs", method = "pearson")
+oxi_data_GY_dist_DRO <- as.dist(1 - oxi_data_GY_cor_DRO)
+oxi_data_tree_DRO <- hclust(oxi_data_GY_dist_DRO, method = "complete")
+oxi_data_dend_DRO <- as.dendrogram(oxi_data_tree_DRO)
+
+
+
+# Step 1: Prepare data by excluding non-numeric columns
+# Assuming the first three columns are non-numeric: taxa, treatment, designation
+data_numeric <- oxi_data_GY_DRO[, 4:ncol(oxi_data_GY_DRO)]  
+
+# Step 2: Compute Pearson correlation matrix
+cor_matrix <- cor(data_numeric, method = "pearson")
+
+# Step 3: Compute correlation p-values
+# Initialize a matrix for p-values
+p_values_matrix <- matrix(NA, ncol = ncol(data_numeric), nrow = ncol(data_numeric))
+
+# Loop through pairs to calculate p-values using cor.test()
+for (i in 1:(ncol(data_numeric) - 1)) {
+  for (j in (i + 1):ncol(data_numeric)) {
+    cor_test_result <- cor.test(data_numeric[[i]], data_numeric[[j]], method = "pearson")
+    p_values_matrix[i, j] <- cor_test_result$p.value
+    p_values_matrix[j, i] <- cor_test_result$p.value
+  }
+}
+colnames(p_values_matrix) <- colnames(cor_matrix)
+rownames(p_values_matrix) <- colnames(cor_matrix)
+# Step 4: View the correlation matrix and p-values matrix
+
+write.csv(cor_matrix,paste0(outputfolder,"cor_matrix_CHR",Chromosome_number,".csv" ))
+write.csv(p_values_matrix,paste0(outputfolder,"p_values_matrix_CHR",Chromosome_number,".csv" ))
+
+# Customize the layout
+lmat <- rbind(c(4, 3), c(2, 1))  # Matrix layout: key, top dendrogram, left dendrogram, heatmap
+lhei <- c(1.5, 4)  # Heights for the rows
+lwid <- c(1.5, 4)  # Widths for the columns
+
+# Assign row and column names
+labRow <- rownames(oxi_data_GY_cor_DRO)  # Replace with your row labels if different
+labCol <- colnames(oxi_data_GY_cor_DRO)  # Replace with your column labels if different
+
+# Generate color palate
+viridis_colors <- viridis(100, option = "D")
+
+# Generate graph
+pdf(paste0(outputfolder,"CHR",Chromosome_number,".pdf"), width = 5, height = 5)
+heatmap.2(oxi_data_GY_cor_DRO, 
+          Rowv = oxi_data_dend_DRO, 
+          Colv = oxi_data_dend_DRO, 
+          dendrogram = "both", 
+          revC = TRUE,  
+          trace = "none", 
+          density.info = "none",
+          col = viridis_colors, key = TRUE,
+          labRow = labRow, labCol = labCol,
+          lmat = lmat, lhei = lhei, lwid = lwid)
+dev.off()
+}
+
+
+
+
+
+
+test1 <- oxi_data_GY_DRO
+
+# Step 1: Prepare data by excluding non-numeric columns
+# Assuming the first three columns are non-numeric: taxa, treatment, designation
+data_numeric <- test1[, 4:ncol(test1)]  
+
+# Step 2: Compute Pearson correlation matrix
+cor_matrix <- cor(data_numeric, method = "pearson")
+
+# Step 3: Compute correlation p-values
+# Initialize a matrix for p-values
+p_values_matrix <- matrix(NA, ncol = ncol(data_numeric), nrow = ncol(data_numeric))
+
+# Loop through pairs to calculate p-values using cor.test()
+for (i in 1:(ncol(data_numeric) - 1)) {
+  for (j in (i + 1):ncol(data_numeric)) {
+    cor_test_result <- cor.test(data_numeric[[i]], data_numeric[[j]], method = "pearson")
+    p_values_matrix[i, j] <- cor_test_result$p.value
+    p_values_matrix[j, i] <- cor_test_result$p.value
+  }
+}
+colnames(p_values_matrix) <- colnames(cor_matrix)
+rownames(p_values_matrix) <- colnames(cor_matrix)
+# Step 4: View the correlation matrix and p-values matrix
+cor_matrix
+p_values_matrix
+
+
+
+
