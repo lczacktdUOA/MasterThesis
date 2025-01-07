@@ -1,0 +1,300 @@
+# Edit rTassel Graphs
+install.packages("gridExtra")
+
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+library(stats)
+library(dplyr)
+#import data Variables:
+Project.name <- "Rice_Project_2024"
+Spieces.name <- "Rice"
+Chromisome_number <- "11"
+QTLnumber <- "4"
+Treatment <- "WD"
+#significant/graphing variables
+pvalue <- c(5.973, 5, 4)
+LD_block <- c(33177486,33402907)
+
+
+
+# import data constants:
+rTASSEL_Path <-paste0("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/code_output/rtassel_output/QTL_data_output/CHR",Chromisome_number,"/")
+EIO <-paste0(rTASSEL_Path)
+
+output_Path <- paste0(EIO,"PNG/")
+Manhattan_output_Path <- paste0(output_Path, "Manhattan/")
+Gene_output_path <- paste0(output_Path, "Gene/")
+
+GWASpath <- paste0(EIO,"CSV/")
+setwd(GWASpath)
+
+other_files_path <-"C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Additional_Data/"
+
+Genes_intrest <-paste0(other_files_path,"Genes_intrest.csv")
+Genes <- read.csv(Genes_intrest)
+Genes$Y <- 1
+Genes$lable <- (((Genes$Pos1 - Genes$Pos2)/4) + Genes$Pos2)
+Genes$Simple.Fuction <- factor(Genes$Simple.Fuction)
+Genes <- subset(Genes,Genes$Chr == as.numeric(Chromisome_number))
+
+QTL.name.list <- "QTLi_info.txt"
+QTLP_file <- paste0(other_files_path, QTL.name.list)
+QTL <- read.table(QTLP_file, header = TRUE, sep = "\t", fill = TRUE)
+QTL <- subset(QTL, Chr == Chromisome_number & QTLInumber == QTLnumber & treatment == Treatment)
+
+
+Zooming1 <- as.numeric(gsub(",", "", QTL$position1[1]))
+Zooming2 <- as.numeric(gsub(",", "", QTL$position2[1]))
+Zooming <- c(Zooming1,Zooming2)
+msSNP <- (QTL$position3[1]* 10^-6)
+
+############################# Upload GWAS results ##############################
+
+
+# List all CSV files in the directory
+csv_files <- list.files(pattern = "\\_MLM_imputed.csv")
+
+# Read all CSV files into a list of data frames
+data_list <- lapply(csv_files, read.csv)
+
+# name the data list according to metabolic name.
+names(data_list) <- gsub("\\_MLM_imputed.csv$", "", csv_files)
+
+
+
+############################# editing GWAS results #############################
+
+for(i in 1:length(names(data_list))){
+  # clean data frame
+  n <- nrow(data_list[[i]])
+  data_list[[i]] <- data_list[[i]][2:n,]
+  data_list[[i]]$Chr <- factor(data_list[[i]]$Chr)
+  data_list[[i]]$Trait <- names(data_list)[i]
+  
+  # standard color sort
+  test1 <- subset(data_list[[i]],grepl( paste0("Chr",Chromisome_number,"pos"), data_list[[i]]$Marker))
+  data_list[[i]]$Color <- ifelse(data_list[[i]]$Marker %in% test1$Marker, "#FC4E07", "#00AFBB")
+
+  # msSNP
+  QTLrownumber <- which(QTL$Chr == data_list[[i]]$Chr[1])
+  QTLnameslisting1 <- list(unique(QTL$Marker1[QTLrownumber]))
+  QTLnameslisting2 <- list(unique(QTL$Marker2[QTLrownumber]))
+  
+  QTLndata1 <- data.frame(unique(QTL$Marker1[QTLrownumber]))
+  QTLndata1 <-  t(QTLndata1)
+  colnames(QTLndata1) <- unique(QTL$Marker1[QTLrownumber])
+  QTLndata1 <- as.data.frame(QTLndata1)
+
+  QTLndata2 <- data.frame(unique(QTL$Marker2[QTLrownumber]))
+  QTLndata2 <-  t(QTLndata2)
+  colnames(QTLndata2) <- unique(QTL$Marker2[QTLrownumber])
+  QTLndata2 <- as.data.frame(QTLndata2)
+
+  # Add 20 rows (example: adding rows with NA values)
+  new_rows <- data.frame(matrix(NA, nrow = 20, ncol = ncol(QTLndata1)))
+  colnames(new_rows) <- colnames(QTLndata1)
+
+  QTLndata1 <- rbind(QTLndata1, new_rows)
+  QTLndata1 <- QTLndata1[2:nrow(QTLndata1),]
+
+  new_rows <- data.frame(matrix(NA, nrow = 20, ncol = ncol(QTLndata2)))
+  colnames(new_rows) <- colnames(QTLndata2)
+
+  QTLndata2 <- rbind(QTLndata2, new_rows)
+  QTLndata2 <- QTLndata2[2:nrow(QTLndata2),]
+
+  for(QTLinterger in 1:length(QTLrownumber)){
+    QTLrow1 <- QTLrownumber[QTLinterger]
+    marker <- QTL$Marker1[QTLrow1]
+    rownumber <- which(data_list[[i]]$Marker == marker)
+    data_list[[i]]$Color[rownumber] <- "purple"
+    index <- which(colnames(QTLndata1) == marker)
+    QTLndata1[QTLinterger,index] <- QTL$qtlname[QTLrow1]
+    if (!is.na(QTL$Marker2[QTLrow1])) {
+      marker <- QTL$Marker2[QTLrow1]
+      rownumber2 <- which(data_list[[i]]$Marker == QTL$Marker2[QTLrow1])
+      data_list[[i]]$Color[rownumber2] <- "purple"
+      index <- which(colnames(QTLndata2) == marker)
+      QTLndata2[QTLinterger,index] <- QTL$qtlname[QTLrow1]
+      
+    }
+  }
+  if (i == 1) { # generate the combined_data frame
+      combined_data <- data_list[[i]]
+  } else { # add to the combined data frame
+      combined_data <- rbind(combined_data, data_list[[i]])
+  }
+}
+combined_data$Trait <- factor(combined_data$Trait)
+combined_data <- combined_data %>%
+  arrange(factor(Color, levels = c("#00AFBB", "#FC4E07", "purple")))
+combined_data$naming <- ""
+
+combined_data <- subset(combined_data, Trait == "QTLi11")
+
+if (any(colnames(QTLndata1) %in% colnames(QTLndata2))) {
+  common_cols <- intersect(colnames(QTLndata1), colnames(QTLndata2))
+  unique_cols1 <- setdiff(na.omit(colnames(QTLndata1)), common_cols)
+  unique_cols2 <- setdiff(na.omit(colnames(QTLndata2)), common_cols)
+  # Combine unique columns
+  unique_combined1 <- QTLndata1[unique_cols1]
+  unique_combined2 <- QTLndata2[unique_cols2]
+  all_combined <- cbind(unique_combined1, unique_combined2)
+  
+  for (col in common_cols) {
+    # Get data for the current column from both data frames
+    data1 <- QTLndata1[[col]]
+    data2 <- QTLndata2[[col]]
+    
+    # Combine data (non-NA values from both data frames)
+    combined <- ifelse(is.na(data1), data2, ifelse(is.na(data2), data1, paste(data1, data2, sep = " / ")))
+    
+    # Add combined data to the list with unique column name
+    all_combined[[col]] <- combined
+    for (n in 1:length(colnames(all_combined))) {
+      QTLmarker <- colnames(all_combined)[n]
+      nrow1 <- which(combined_data$Marker == QTLmarker)
+      inputingname <- paste(na.omit(unique(all_combined[, n])), collapse = ", ")
+      # Combine QTL names into one string and assign
+      combined_data$naming[nrow1] <- inputingname
+    }
+  }
+} else {
+  for (n in 1:length(colnames(QTLndata1))) {
+    QTLmarker <- colnames(QTLndata1)[n]  # Access column names correctly
+    nrow1 <- which(combined_data$Marker == QTLmarker)
+    inputingname <- paste(na.omit(unique(QTLndata1[, n])), collapse = ", ")
+    # Combine QTL names into one string and assign
+    combined_data$naming[nrow1] <- inputingname
+  }
+  for (n in 1:length(colnames(QTLndata2))) {
+    QTLmarker <- colnames(QTLndata2)[n]  # Access column names correctly
+    nrow2 <- which(combined_data$Marker == QTLmarker)
+    
+    # Combine QTL names into one string and assign
+    combined_data$naming[nrow2] <- paste(na.omit(unique(QTLndata2[, n])), collapse = ", ")
+  }
+}
+
+
+############################# Manhattan plots ############################################
+
+setwd(Manhattan_output_Path)
+
+nameplot <- paste0("HDRC",Chromisome_number,"_",Treatment,".pdf")
+GWAStitle <-  paste0("HDRC",Chromisome_number,"-",Treatment)
+
+#Full Manhattan
+PLOT <- ggplot(combined_data, aes(x = (Pos * 10^-6), y = -log10(p), color = Color)) +
+  geom_point(size = 1) +  
+  labs(x = "Mbp", y = "-log10(p)", title = GWAStitle) +
+  scale_color_identity() +
+  scale_y_continuous(breaks = seq(0, 10, by = 1)) +
+  geom_hline(yintercept = pvalue, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = msSNP, color = "black", linetype = "dotted") +
+  facet_grid(. ~ Trait, scales = "free_x") +
+  theme_bw() +
+  guides(color = "none")
+
+pdf(file = nameplot, width = 14, height = 3.57)
+print(PLOT)
+dev.off()
+
+#Zoomed data frame
+combined_data_zoomed <- subset(combined_data, combined_data$Pos >= Zooming[1] & combined_data$Pos <= Zooming[2])
+
+combined_data_zoomed <- combined_data_zoomed %>%
+  arrange(factor(Color, levels = c("#00AFBB", "#FC4E07", "purple")))
+
+nameplot <- paste0("HDRC",Chromisome_number,"_",Treatment,"zoomed.pdf")
+GWAStitle <-  paste0("HDRC",Chromisome_number,"-",Treatment,"zoomed")
+
+#Zoomed Manhattan
+PLOT <- ggplot(combined_data_zoomed, aes(x = (Pos * 10^-6), y = -log10(p), color = Color)) +
+  geom_point(size = 1) +  # Removed 'shape' argument here
+  labs(x = "Mbp", y = "-log10(p)", title = GWAStitle) +
+  scale_color_identity() +
+  scale_y_continuous(breaks = seq(0, 10, by = 1)) +
+  #scale_x_continuous(breaks = seq(0, 10, by = .06), labels = scales::number_format(accuracy = 0.01)) +
+  #only necessary if large number of QTLs where detected!
+  geom_hline(yintercept = pvalue, color = "black", linetype = "dotted") +
+  facet_grid(. ~ Trait, scales = "free_x") +
+  geom_text_repel(aes(label = naming), size = 1,box.padding = unit(0.07, "lines"),point.padding = unit(.1, "lines"),segment.length = 0.05, max.overlaps = Inf)+
+  theme_bw() +
+  guides(color = "none")
+
+pdf(file = nameplot, width = 14, height = 3.57)
+print(PLOT)
+dev.off()
+
+
+################################## Gene of interest graph ######################
+
+setwd(Gene_output_path)
+
+nameplot <- paste0("QTLi_CHR_",Chromisome_number,"_Gene.png")
+
+QTLndata1 <- c("biosynthesis" = "blue", "regulation" = "yellow",
+             "transport" = "lightgreen",  "Unkown" = "lightgrey",
+             "repair" = "orange", "catalytic" = "black", "Cell membrane" = "lightblue",
+             "decomposition" = "#800020", "defense response" = "green")
+QTLsub <- subset(QTL,QTL$Chr == as.numeric(Chromisome_number))
+xintercepts <- unique(na.omit(c(QTLsub$Markerpos1* 10^-6, QTLsub$Markerpos2* 10^-6)))
+LD_block
+PLOT <- ggplot(Genes, aes(x = (Pos1 * 10^-6), y = Y, color = Simple.Fuction)) +
+  labs(x = "Mbp", y = "") +
+  geom_rect(
+    aes(xmin = LD_block[1] * 10^-6, xmax = LD_block[2] * 10^-6,
+        ymin = Y - 1, ymax = Y, fill = "red")
+  ) +
+  geom_rect(
+    aes(xmin = Pos1 * 10^-6, xmax = Pos2 * 10^-6,
+        ymin = Y - 1, ymax = Y, fill = Simple.Fuction)
+  ) +
+  geom_text(aes(x = lable * 10^-6, y = Y + 0.01, label = Gene.name), 
+            color = "black", size = 1.5, vjust = 0, hjust = 0, angle = 90) +
+  scale_y_continuous(breaks = seq(0, 10, by = 1)) +
+  scale_fill_manual(values = QTLndata1) +  # Use QTLndata1 for fill colors
+  scale_color_manual(values = QTLndata1) +  # Use QTLndata1 for color mapping
+  geom_vline(xintercept = xintercepts, color = "purple", linetype = "dotted") +
+  ylim(0, 2) + 
+  theme_bw() +
+  theme(
+    axis.line.y = element_blank(),  # Remove y-axis line
+    axis.text.y = element_blank(),  # Remove y-axis text labels
+    axis.ticks.y = element_blank(),  # Remove y-axis ticks
+    axis.title.y = element_blank()   # Remove y-axis title
+  ) +
+  guides(color = "none", fill = "none")
+
+ggsave(nameplot, plot = PLOT, width = 13.75, height = 1.75,dpi = 800)
+
+
+################################## QQ-plot #####################################
+
+
+for(i in 1:length(names(data_list))){
+  QQtest <- data_list[[i]]
+  QQtest$observed <- -log10(QQtest$p)
+  QQtest_sorted <- QQtest %>% arrange(desc(observed))
+  QQtest_sorted$expected <- -log10(ppoints(length(QQtest$p)))
+  if (i == 1) { # generate the combined_data frame
+    QQtest_data <- QQtest_sorted
+  } else { # add to the combined data frame
+    QQtest_data <- rbind(QQtest_data, QQtest_sorted)
+  }
+}
+
+nameplot <- paste0("QTLi_CHR_",Chromisome_number,"_QQplot.png")
+QQtitle <- paste0("QTLi-",Chromisome_number,"-QQ-plot")
+
+PLOT <- ggplot(QQtest_data, aes(x = expected, y = observed, color = Trait)) +
+  geom_point() +  # Color mapping happens here based on Trait
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +  
+  ggtitle(QQtitle) +  
+  theme_minimal() +
+  labs(x = "Expected -log10(p)", y = "Observed -log10(p)")
+ggsave(nameplot, plot = PLOT, width = 3.57, height = 3.57,dpi = 800)
+
+
