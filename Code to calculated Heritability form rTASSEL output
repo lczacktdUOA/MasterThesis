@@ -1,0 +1,35 @@
+#Caluclate Heritability
+    #The fundimental equation is H = GV/(GV+EV)
+    #where H is the heritability
+    #where GV is the Genetic Verability
+    #where EV is the eniviromental Verability
+GWAS_results <- read.csv(paste0("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/code_output/rtassel_output/GWAS(47)/CON_AllGWAS_40MLM_stats.csv"))
+# GV = GWAS_results$Genetic_Var
+# EV = GWAS_results$Residual_Var
+traitkey <- read.table("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/Phenotypic_Data/Trait.key.txt", sep = "\t", header = TRUE)
+
+# Load necessary libraries
+library(dplyr)
+first_line_per_trait <- GWAS_results %>%
+  group_by(Trait) %>%    # Group by trait
+  slice(1) %>%           # Take the first row in each group
+  ungroup()              # Ungroup the result
+first_line_per_trait$Heritability <- first_line_per_trait$Genetic_Var / 
+  (first_line_per_trait$Genetic_Var + first_line_per_trait$Residual_Var)
+
+GWAS_results2 <- read.csv(paste0("C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/code_output/rtassel_output/GWAS(47)/EXP_AllGWAS_40MLM_stats.csv"))
+first_line_per_trait2 <- GWAS_results2 %>%
+  group_by(Trait) %>%    # Group by trait
+  slice(1) %>%           # Take the first row in each group
+  ungroup()              # Ungroup the result
+first_line_per_trait2$Heritability <- first_line_per_trait2$Genetic_Var / 
+  (first_line_per_trait2$Genetic_Var + first_line_per_trait2$Residual_Var)
+output_table <- cbind(first_line_per_trait2$Trait, first_line_per_trait$Heritability, first_line_per_trait2$Heritability)
+colnames(output_table) <- c("Trait", "Heritability under WW conditions","Heritability under WD conditions")
+output_table <- as.data.frame(output_table)
+# Select only the necessary columns from traitkey before the join
+output_table <- output_table %>%
+  left_join(traitkey %>% select(Assigned_Name, Trait_Name), by = c("Trait" = "Assigned_Name")) %>%
+  mutate(Trait = coalesce(Trait_Name, Trait)) %>%  # Replace Trait with Trait_Name if available
+  select(-Trait_Name)  # Remove Trait_Name after replacement
+write.csv(output_table,"heritability.csv", row.names = F)
