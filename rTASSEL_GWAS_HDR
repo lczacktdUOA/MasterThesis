@@ -1,0 +1,145 @@
+
+################################credits#########################################
+
+
+#rTassel PCA/GWAS of rice metabolic products under Drought stress.
+#Zachary Dickens
+# based on Chosens' code
+
+
+####################### Install/remove rJava/rTASSEL ###########################
+
+# If memery issues accure remove the packages
+ remove.packages("rJava")
+ remove.packages("rTASSEL")
+
+install.packages("rJava")
+devtools::install_github(
+  repo = "maize-genetics/rTASSEL",
+  ref = "master",
+  build_vignettes = TRUE,
+  dependencies = TRUE
+)
+
+
+########################Allocate maximum memory to rTASSEL######################
+
+
+#You need to give java memory before rJava or rTASSEL library are added!
+options(java.parameters = c("-Xmx200g", "-Xms30g"))
+
+
+library(rJava)
+library(rTASSEL)
+
+library(dplyr)
+library(ggplot2)
+library(magrittr)
+library(tibble)
+library(ggtree)
+
+
+###########################General Input/Output data############################
+
+
+##########Defining project##########
+
+# Should be the only variables changed per project!
+  # except the trait name for the formula in the GWAS.
+
+Project.name <-         "Rice_Project_2024"
+Spieces.name <-         "Rice"
+Output_name <-          "Testing2"
+Chromosome <-           "11"
+Treatment <-            "Experimental"
+GWASTrait <-            "QTLi11"
+
+# Setting up Input pathways and output pathways
+
+EIO <-                  paste0("C:/Users/lczacktd/Desktop/47_imputed/Chr",Chromosome,"/HPM/")
+rTASSEL_output <-       paste0(EIO,"rTASSEL_output/")
+GWAS_output <-          paste0(rTASSEL_output,Treatment,"/")
+CSV_GWAS_output <-      paste0(GWAS_output,"CSV/")
+data_path_original <-   "C:/Users/lczacktd/Desktop/Zachary_Dickens/Projects/Rice_Project_2024/Data/"
+
+
+# Setting working directory for logging file
+setwd(rTASSEL_output)
+
+# Create logging file. #This should be run once at the beginning of the analysis
+rTASSEL::startLogger(fullPath = NULL, fileName = Output_name)
+
+###########The Pathway of Phenotype and Genomic(SNP)###########
+
+# The Pathway of Phenotype and Genomic(SNP) data
+
+PP <-        paste0(data_path_original,"Phenotypic_Data/")       
+GP1 <-       paste0(data_path_original,"Genomic(SNP)_Data/")
+
+# Name of Phenotype/Genomic Data file
+PN <-        paste0(Spieces.name,"_Pheno_TASSEL_EXP.QTLi.txt")                                                       
+GN1 <-       paste0(Spieces.name,"_SNP_Clean.hmp.txt")
+GN2 <-       "hmpALL.test.hmp.txt"
+
+# Imputing Data file name
+PH_file <-   paste0(PP,PN)                          
+snp_file1 <- paste0(GP1,GN1) 
+snp_file2 <- paste0(EIO,GN2)
+
+#################Load genotype and phenotype data into rTASSEL##################
+
+geno1 <- rTASSEL::readGenotypeTableFromPath(path = snp_file1)
+geno2 <- rTASSEL::readGenotypeTableFromPath(path = snp_file2)
+pheno <- rTASSEL::readPhenotypeFromPath(path = PH_file)
+
+############Joining Data in rTASSEL
+
+geno_pheno <- readGenotypePhenotype(
+  phenoPathDFOrObj = pheno,
+  genoPathOrObj = geno2
+)
+geno1_pheno <- readGenotypePhenotype(
+  phenoPathDFOrObj = pheno,
+  genoPathOrObj = geno1
+)
+
+###########Filter genotype table sites###########
+
+geno_pheno_filtered <- rTASSEL::filterGenotypeTableSites(
+  tasObj = geno_pheno,
+  siteMinCount = 150,
+  siteMinAlleleFreq = 0.05,
+  siteMaxAlleleFreq = 1.0,
+  siteRangeFilterType = "none"
+)
+#Experimental
+geno1_pheno_filtered <- rTASSEL::filterGenotypeTableSites(
+  tasObj = geno1_pheno,
+  siteMinCount = 150,
+  siteMinAlleleFreq = 0.05,
+  siteMaxAlleleFreq = 1.0,
+  siteRangeFilterType = "none"
+)
+
+###########Create a kinship matrix object
+
+kin <- rTASSEL::kinshipMatrix(
+  tasObj = geno1_pheno_filtered,
+  method = "Centered_IBS",
+  maxAlleles = 6)
+
+
+##################################GWAS##########################################
+
+QTL_GWAS <- assocModelFitter(
+  geno_pheno_filtered,
+  formula = QTLi11 ~ Treatment,
+  fitMarkers = TRUE,
+  kinship = kin,
+  maxP = 1)
+
+#################################CSV############################################
+
+CSV_EXP_output <- paste0(rTASSEL_output,"Experimental/CSV/",GWASTrait,"_MLM_imputed.csv")
+results_CSV_data <- QTL_GWAS@results$MLM_Stats[QTL_GWAS@results$MLM_Stats$Trait == GWASTrait, ]
+write.csv(results_CSV_data, CSV_EXP_output, row.names = FALSE)
